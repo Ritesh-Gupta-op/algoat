@@ -13,23 +13,60 @@
 #include "algoat/core/dispatcher.hpp"
 
 #include <cstddef>
+#include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <span>
 #include <string>
 
 namespace algoat {
 
+namespace detail {
+
+struct GlobalConfigState {
+    core::AlgoConfig config;
+    mutable std::shared_mutex mutex;
+};
+
+inline GlobalConfigState& get_global_config_state() {
+    static GlobalConfigState state;
+    return state;
+}
+
+class GlobalConfigReadGuard {
+    const GlobalConfigState& state_;
+    std::shared_lock<std::shared_mutex> lock_;
+
+public:
+    explicit GlobalConfigReadGuard(const GlobalConfigState& state)
+        : state_(state), lock_(state.mutex) {}
+
+    const core::AlgoConfig* operator->() const {
+        return &state_.config;
+    }
+
+    const core::AlgoConfig& get() const {
+        return state_.config;
+    }
+};
+
+} // namespace detail
 /**
  * @brief Retrieves the thread-safe global configuration instance.
  *
  * This singleton @c AlgoConfig controls default preferences, fallback algorithms,
  * and thresholds used by @c algoat::sort and @c algoat::search.
  *
- * @return Reference to the static global @c core::AlgoConfig.
+ * @return A @c detail::GlobalConfigReadGuard proxy that holds a shared read lock on the global @c core::AlgoConfig for its lifetime.
  */
-inline core::AlgoConfig& get_global_config() {
-    static core::AlgoConfig config;
-    return config;
+
+inline detail::GlobalConfigReadGuard get_global_config() {
+    return detail::GlobalConfigReadGuard(detail::get_global_config_state());
+}
+
+inline core::Dispatcher& get_dispatcher() {
+    static core::Dispatcher dispatcher(detail::get_global_config_state().config);
+    return dispatcher;
 }
 
 /**
@@ -40,7 +77,11 @@ inline core::AlgoConfig& get_global_config() {
  * @throws std::runtime_error If the file cannot be opened or contains invalid JSON.
  */
 inline void load_global_config(const std::string& filepath) {
-    get_global_config() = core::load_config(filepath);
+    auto config = core::load_config(filepath);
+
+    auto& state = detail::get_global_config_state();
+    std::unique_lock lock(state.mutex);
+    state.config = std::move(config);
 }
 
 /**
@@ -55,8 +96,8 @@ inline void load_global_config(const std::string& filepath) {
  * @param data Contiguous span of elements to sort in-place.
  */
 template <typename T> void sort(std::span<T> data) {
-    core::Dispatcher dispatcher(get_global_config());
-    dispatcher.sort(data);
+    auto config = get_global_config();
+    get_dispatcher().sort(data);
 }
 
 /**
@@ -73,9 +114,13 @@ template <typename T> void sort(std::span<T> data) {
  * @return <tt>std::optional<std::size_t></tt> Index of the matching element if found, or @c
  * std::nullopt.
  */
+template <typename T> std::optional<std::size_t> search(std::span<const T> data, const T& target) {
+    auto config = get_global_config();
+    return get_dispatcher().search(data, target);
+}
+
 template <typename T> std::optional<std::size_t> search(std::span<T> data, const T& target) {
-    core::Dispatcher dispatcher(get_global_config());
-    return dispatcher.search(data, target);
+    return search(std::span<const T>{data.data(), data.size()}, target);
 }
 
 } // namespace algoat

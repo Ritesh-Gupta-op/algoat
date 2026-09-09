@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include "algoat/utils.hpp"
+
 #include <cstddef>
 #include <optional>
 #include <span>
@@ -52,6 +54,11 @@ struct InterpolationSearch {
      */
     template <typename T>
     std::optional<std::size_t> search(std::span<T> data, const T& target) const {
+        return search(std::span<const T>{data.data(), data.size()}, target);
+    }
+
+    template <typename T>
+    std::optional<std::size_t> search(std::span<const T> data, const T& target) const {
         if (data.empty())
             return std::nullopt;
 
@@ -78,6 +85,8 @@ struct InterpolationSearch {
                      (static_cast<double>(data[high]) - static_cast<double>(data[low]))) *
                         (static_cast<double>(target) - static_cast<double>(data[low]));
 
+                pos_double =
+                    algoat::clamp(pos_double, static_cast<double>(low), static_cast<double>(high));
                 std::size_t pos = static_cast<std::size_t>(pos_double);
 
                 if (data[pos] == target) {

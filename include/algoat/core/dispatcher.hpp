@@ -24,6 +24,12 @@
 
 namespace algoat::core {
 
+template <typename Algo, typename T>
+concept CanSortData = requires(Algo a, std::span<T> arr) { a.sort(arr); };
+
+template <typename Algo, typename T>
+concept CanSearchData = requires(Algo a, std::span<const T> arr, const T& t) { a.search(arr, t); };
+
 /**
  * @class Dispatcher
  * @brief Central controller for dynamic algorithm selection and execution.
@@ -44,22 +50,21 @@ namespace algoat::core {
  *
  *
  * @par Searching Heuristics (@c "auto"):
- * - <b>Sorted Data</b> (sortedness ratio <tt>== 1.0</tt>): @c BinarySearch (<tt>O(log N)</tt>).
- * - <b>Unsorted Data:</b> @c LinearSearch (<tt>O(N)</tt>).
+ * - <b>Default:</b> @c AdaptiveBinarySearch (dynamic <tt>O(log N)</tt> with automatic
+ * invariant verification and <tt>O(N)</tt> fallback if monotonicity violations are detected).
  */
 class Dispatcher {
     Registry<sorting::SortVariant> sort_registry_; ///< Registry of available sorting algorithms.
     Registry<searching::SearchVariant>
         search_registry_; ///< Registry of available searching algorithms.
-    AlgoConfig config_;   ///< User-defined configuration preferences.
-
+    AlgoConfig& config_;   ///< Configuration reference; callers must hold the appropriate external lock when accessing it.
 public:
     /**
      * @brief Constructs a Dispatcher with the given configuration, registering default algorithms.
      *
      * @param config Configuration options specifying algorithm preferences and fallbacks.
      */
-    explicit Dispatcher(AlgoConfig config);
+    explicit Dispatcher(AlgoConfig& config);
 
     /**
      * @brief Sorts a contiguous span using dynamic heuristic selection.
@@ -103,14 +108,23 @@ public:
         }
 
         auto algo_variant = sort_registry_.create(algo_name);
-        std::visit([data](auto&& algo) { algo.sort(data); }, algo_variant);
+        std::visit(
+            [data](auto&& algo) {
+                using AlgoType = std::remove_cvref_t<decltype(algo)>;
+                if constexpr (CanSortData<AlgoType, T>) {
+                    algo.sort(data);
+                } else {
+                    throw std::invalid_argument("Algorithm does not support this data type.");
+                }
+            },
+            algo_variant);
     }
 
     /**
      * @brief Searches for a target value in a span using dynamic heuristic selection.
      *
-     * Profiles @c data via <tt>analyze()</tt>, selects @c BinarySearch if data is fully sorted,
-     * otherwise dispatches to @c LinearSearch (or user preferences).
+     * Dispatches directly to @c AdaptiveBinarySearch for safe sub-linear search unless
+     * overridden by user configuration.
      *
      * @tparam T The element type in the span.
      *
@@ -122,16 +136,11 @@ public:
      * unregistered.
      */
     template <typename T>
-    std::optional<std::size_t> search(std::span<T> data, const T& target) const {
-        DataTraits traits = analyze(data);
+    std::optional<std::size_t> search(std::span<const T> data, const T& target) const {
         std::string algo_name = config_.searching.prefer.value_or("auto");
 
         if (algo_name == "auto" || algo_name.empty()) {
-            if (traits.sortedness_ratio == 1.0) {
-                algo_name = "binarysearch";
-            } else {
-                algo_name = "linearsearch";
-            }
+            algo_name = "adaptivebinarysearch";
         }
 
         if (!search_registry_.has(algo_name)) {
@@ -145,9 +154,19 @@ public:
         auto algo_variant = search_registry_.create(algo_name);
         return std::visit(
             [data, &target](auto&& algo) -> std::optional<std::size_t> {
-                return algo.search(data, target);
+                using AlgoType = std::remove_cvref_t<decltype(algo)>;
+                if constexpr (CanSearchData<AlgoType, T>) {
+                    return algo.search(data, target);
+                } else {
+                    throw std::invalid_argument("Algorithm does not support this data type.");
+                }
             },
             algo_variant);
+    }
+
+    template <typename T>
+    std::optional<std::size_t> search(std::span<T> data, const T& target) const {
+        return search(std::span<const T>{data.data(), data.size()}, target);
     }
 };
 

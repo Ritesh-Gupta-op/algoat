@@ -5,6 +5,7 @@
 
 #include "algoat/core/dispatcher.hpp"
 
+#include "algoat/searching/adaptive_binary_search.hpp"
 #include "algoat/searching/binary_search.hpp"
 #include "algoat/searching/interpolation_search.hpp"
 #include "algoat/searching/linear_search.hpp"
@@ -29,7 +30,7 @@
 
 namespace algoat::core {
 
-Dispatcher::Dispatcher(AlgoConfig config) : config_(std::move(config)) {
+Dispatcher::Dispatcher(AlgoConfig& config) : config_(config) {
     // Register all supported sorting algorithms into the sorting registry
     // Each algorithm maps to a variant constructor lambda.
     sort_registry_.register_algo("insertionsort",
@@ -78,6 +79,9 @@ Dispatcher::Dispatcher(AlgoConfig config) : config_(std::move(config)) {
         "binarysearch", []() -> searching::SearchVariant { return searching::BinarySearch{}; });
     search_registry_.register_algo("interpolationsearch", []() -> searching::SearchVariant {
         return searching::InterpolationSearch{};
+    });
+    search_registry_.register_algo("adaptivebinarysearch", []() -> searching::SearchVariant {
+        return searching::AdaptiveBinarySearch{};
     });
 }
 
