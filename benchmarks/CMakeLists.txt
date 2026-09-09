@@ -11,3 +11,7 @@ target_link_libraries(bench_sorting PRIVATE algoat benchmark::benchmark benchmar
 
 add_executable(bench_profiler bench_profiler.cpp)
 target_link_libraries(bench_profiler PRIVATE algoat benchmark::benchmark benchmark::benchmark_main)
+
+add_executable(bench_eytzinger_search bench_eytzinger_search.cpp)
+target_link_libraries(bench_eytzinger_search PRIVATE algoat benchmark::benchmark)
+
